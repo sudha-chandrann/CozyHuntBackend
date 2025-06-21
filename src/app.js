@@ -3,8 +3,10 @@ import cors from "cors"
 import cookieParser from "cookie-parser";
 import dotenv from 'dotenv';
 import UserRouter from "./routes/user.route.js"
+import { handleMulterError } from "./middleware/multer.js";
 dotenv.config();
 const app = express()
+
 
 app.use(cors({
   origin: process.env.CORS_ORIGIN || 'http://localhost:5173', 
@@ -21,7 +23,7 @@ app.use(express.urlencoded({
 }))
 
 app.use(express.static("public"))
-
+app.use(handleMulterError);
 app.use(cookieParser())
 
 app.use("/api/v1/users", UserRouter);

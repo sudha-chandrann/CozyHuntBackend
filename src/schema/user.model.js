@@ -13,7 +13,15 @@ const userSchema = new Schema(
   verficationCode:{type:String,default:''},
   verficationCodeExpires:{ type: Date,default: null},
   IsVerfied:{type:Boolean, default:false},
-  identityDocs: [String]
+  verificationDocuments: [{
+    documentType: { type :String},
+    documentUrl: {type : String},
+    publicId: { type: String},
+    uploadedAt: { type: Date, default: Date.now },
+    status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }
+  }],
+  verificationStatus: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified' },
+  verificationNote: { type: String }
   },
   { timestamps: true }
 );
@@ -52,8 +60,64 @@ userSchema.methods.generateRefreshToken = function () {
   );
 };
 
+const verificationRequestSchema = new Schema({
+  userId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true 
+  },
+  documents: [{
+    documentType: { 
+      type: String, 
+      required: true 
+    },
+    documentUrl: { 
+      type: String, 
+      required: true 
+    },
+    publicId: { 
+      type: String, 
+      required: true 
+    },
+    originalName: { 
+      type: String, 
+      required: true 
+    },
+    fileSize: { 
+      type: Number, 
+      required: true 
+    },
+    uploadedAt: { 
+      type: Date, 
+      default: Date.now 
+    }
+  }],
 
+  status: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
+  },
+  
+  adminNotes: { 
+    type: String 
+  },
+  submittedAt: { 
+    type: Date, 
+    default: Date.now 
+  },
+  reviewedAt: { 
+    type: Date 
+  },
+  reviewedBy: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User' 
+  }
+}, {
+  timestamps: true
+});
 
+const VerificationRequest = mongoose.model('VerificationRequest', verificationRequestSchema);
 const User = mongoose.model("User", userSchema);
 
-export {  User};
+export {  User,VerificationRequest};

@@ -1,4 +1,5 @@
-import { User } from "../schema/user.model.js";
+import { cloudinary } from "../middleware/multer.js";
+import { User, VerificationRequest } from "../schema/user.model.js";
 import { sendVerifyEmail } from "../utils/sendVerifyEmail.js";
 
 const registerUser = async (req, res) => {
@@ -27,7 +28,7 @@ const registerUser = async (req, res) => {
     const newUser = await User.create({
       name,
       password,
-      profilePicture: profilePicture || "",
+      profileImage: profileImage || "",
       email,
       role:'user'
     });
@@ -274,7 +275,7 @@ const getcurrentUser = async (req, res) => {
       });
     }
     const user = await User.findById(userId).select(
-      "username email fullName profilePicture bio "
+      "-password -verficationCode -verficationCodeExpires"
     );
     if (!user) {
       return res.status(404).json({
@@ -300,8 +301,138 @@ const getcurrentUser = async (req, res) => {
   }
 };
 
+const determineDocumentType = (filename) => {
+  const lowerFilename = filename.toLowerCase();
+  
+  if (lowerFilename.includes('aadhaar') || lowerFilename.includes('aadhar')) {
+    return 'aadhaar';
+  } else if (lowerFilename.includes('pan')) {
+    return 'pan';
+  } else if (lowerFilename.includes('license') || lowerFilename.includes('dl')) {
+    return 'driving_license';
+  } else if (lowerFilename.includes('passport')) {
+    return 'passport';
+  } else if (lowerFilename.includes('voter')) {
+    return 'voter_id';
+  } else {
+    return 'government_id';
+  }
+};
 
+ const uploadVerificationDocuments = async (req, res) => {
+  try {
+    const files = req.files;
+    const userId = req.user._id;
 
+    if (!files || files.length === 0) {
+      return res.status(400).json({
+        message: "No files uploaded. Please select at least one document.",
+        success: false,
+        status: 400,
+      });
+    }
+
+    const existingRequest = await VerificationRequest.findOne({
+      userId: userId,
+      status: 'pending'
+    });
+
+    if (existingRequest) {
+      for (const file of files) {
+        try {
+          await cloudinary.uploader.destroy(file.filename);
+        } catch (cleanupError) {
+          console.error('Cleanup error:', cleanupError);
+        }
+      }
+      
+      return res.status(400).json({
+        message: "You already have a pending verification request. Please wait for review.",
+        success: false,
+        status: 400,
+      });
+    }
+
+    const processedDocuments = files.map(file => ({
+      documentType: determineDocumentType(file.originalname),
+      documentUrl: file.path,
+      publicId: file.filename,
+      originalName: file.originalname,
+      fileSize: file.size,
+      uploadedAt: new Date()
+    }));
+
+    const verificationRequest = new VerificationRequest({
+      userId: userId,
+      documents: processedDocuments,
+      status: 'pending',
+      submittedAt: new Date()
+    });
+
+    await verificationRequest.save();
+
+    await User.findByIdAndUpdate(userId, {
+      verificationStatus: 'pending',
+    });
+
+    return res.status(200).json({
+      message: "Documents uploaded successfully! Your verification request has been submitted.",
+      success: true,
+      status: 200,
+      data: {
+        requestId: verificationRequest._id,
+        documentsUploaded: files.length,
+        documentTypes: processedDocuments.map(doc => doc.documentType),
+        status: 'pending',
+        estimatedReviewTime: '24-48 hours'
+      },
+    });
+
+  } catch (error) {
+    console.error('Upload error:', error);
+
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        try {
+          if (file.filename) {
+            await cloudinary.uploader.destroy(file.filename);
+          }
+        } catch (cleanupError) {
+          console.error('Cleanup error:', cleanupError);
+        }
+      }
+    }
+
+    return res.status(500).json({
+      message: error.message || "An error occurred while uploading documents",
+      success: false,
+      status: 500,
+    });
+  }
+};
+
+const getVerificationDocuments = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const existingDocuments = await VerificationRequest.find({ userId });
+
+    return res.status(200).json({
+      message: "Documents retrieved successfully!",
+      success: true,
+      status: 200,
+      data: existingDocuments || []
+    });
+
+  } catch (error) {
+    console.error('Retrieval error:', error);
+    return res.status(500).json({
+      message: error.message || "An error occurred while retrieving documents",
+      success: false,
+      status: 500,
+    });
+  }
+};
 
 
 export {
@@ -311,4 +442,6 @@ export {
   verifyEmail,
   logout,
   getcurrentUser,
+  uploadVerificationDocuments,
+ getVerificationDocuments 
 };
