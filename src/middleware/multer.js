@@ -31,8 +31,8 @@ export const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB per file
-    files: 5, // Maximum 5 files
+    fileSize: 10 * 1024 * 1024, 
+    files: 5, 
   },
 });
 
@@ -76,14 +76,12 @@ export const handleCloudinaryUpload = async (req, res, next) => {
       return next();
     }
 
-    // Upload all files to Cloudinary
     const uploadPromises = req.files.map(file =>
       uploadToCloudinary(file.buffer, file.originalname, file.mimetype)
     );
 
     const uploadResults = await Promise.all(uploadPromises);
     
-    // Attach results to request object for use in controller
     req.files = req.files.map((file, index) => ({
       ...file,
       path: uploadResults[index].url,
