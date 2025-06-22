@@ -2,7 +2,8 @@ import express from "express"
 import cors from "cors"
 import cookieParser from "cookie-parser";
 import dotenv from 'dotenv';
-import UserRouter from "./routes/user.route.js"
+import UserRouter from "./routes/user.route.js";
+import ListingRouter from "./routes/list.route.js";
 import { handleMulterError } from "./middleware/multer.js";
 dotenv.config();
 const app = express()
@@ -27,5 +28,6 @@ app.use(handleMulterError);
 app.use(cookieParser())
 
 app.use("/api/v1/users", UserRouter);
+app.use("/api/v1/listings",ListingRouter);
 
 export {app}
