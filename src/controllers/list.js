@@ -3,6 +3,7 @@ import { cloudinary } from "../middleware/multer.js";
 import {
   Listing,
   ListLike,
+  RentalRequest,
   VerificationDocument,
 } from "../schema/list.model.js";
 
@@ -531,7 +532,7 @@ const toggleLiked = async (req, res) => {
         ListId: listId,
       });
       return res.status(200).json({
-        message:"Listing added to favorites",
+        message: "Listing added to favorites",
         data: true,
         success: true,
         status: 200,
@@ -539,8 +540,8 @@ const toggleLiked = async (req, res) => {
     }
 
     await ListLike.deleteOne({
-        userId: userId,
-        ListId: listId,
+      userId: userId,
+      ListId: listId,
     });
     return res.status(200).json({
       message: "Listing removed from favorites",
@@ -558,53 +559,51 @@ const toggleLiked = async (req, res) => {
   }
 };
 
-
 const getAllLikedLists = async (req, res) => {
   try {
     const userId = req.user._id;
 
     const pipeline = [
       {
-        $match: { userId: new mongoose.Types.ObjectId(userId) }
+        $match: { userId: new mongoose.Types.ObjectId(userId) },
       },
       {
         $lookup: {
-          from: 'listings',
-          localField: 'ListId',
-          foreignField: '_id',
-          as: 'listing'
-        }
+          from: "listings",
+          localField: "ListId",
+          foreignField: "_id",
+          as: "listing",
+        },
       },
       {
-        $unwind: '$listing'
+        $unwind: "$listing",
       },
       {
         $match: {
-          'listing.isVerified': true,
-          'listing.isAvailable': true
-        }
-      }
+          "listing.isVerified": true,
+          "listing.isAvailable": true,
+        },
+      },
     ];
-
 
     pipeline.push({
       $project: {
-        _id: '$listing._id',
-        title: '$listing.title',
-        category: '$listing.category',
-        subcategory: '$listing.subcategory',
-        location: '$listing.location',
-        images: '$listing.images',
-        guestCount: '$listing.guestCount',
-        roomCount: '$listing.roomCount',
-        bathroomCount: '$listing.bathroomCount',
-        rent: '$listing.rent',
-        amenities: '$listing.amenities',
-        description: '$listing.description',
-        isAvailable: '$listing.isAvailable',
-        isVerified: '$listing.isVerified',
-        verificationStatus: '$listing.verificationStatus',
-      }
+        _id: "$listing._id",
+        title: "$listing.title",
+        category: "$listing.category",
+        subcategory: "$listing.subcategory",
+        location: "$listing.location",
+        images: "$listing.images",
+        guestCount: "$listing.guestCount",
+        roomCount: "$listing.roomCount",
+        bathroomCount: "$listing.bathroomCount",
+        rent: "$listing.rent",
+        amenities: "$listing.amenities",
+        description: "$listing.description",
+        isAvailable: "$listing.isAvailable",
+        isVerified: "$listing.isVerified",
+        verificationStatus: "$listing.verificationStatus",
+      },
     });
 
     const likedListings = await ListLike.aggregate(pipeline);
@@ -623,7 +622,314 @@ const getAllLikedLists = async (req, res) => {
       status: 500,
     });
   }
-}
+};
+
+const getListById = async (req, res) => {
+  try {
+    const { listId } = req.params;
+    const userId = req.user._id;
+
+    const list = await Listing.findOne({
+      _id: listId,
+      isVerified: true,
+    }).populate({
+      path: "ownerId",
+      select: "name email verificationStatus verified profileImage",
+    });
+
+    if (!list) {
+      return res.status(404).json({
+        message: "Listing not found or you are not authorized to view it.",
+        success: false,
+        status: 404,
+      });
+    }
+
+    const isLiked = await ListLike.findOne({ userId, ListId: listId });
+
+    const existingRequest = await RentalRequest.findOne({
+      tenantId: userId,
+      listingId: listId,
+      status:"pending",
+    });
+
+    const canRequest = !existingRequest && list.isAvailable;
+
+    return res.status(200).json({
+      message: "Listing retrieved successfully.",
+      data: {
+        listing: list,
+        owner: list.ownerId,
+        isLiked: !!isLiked,
+        hasRequested: !!existingRequest,
+        canRequest,
+      },
+      success: true,
+      status: 200,
+    });
+  } catch (error) {
+    console.error("Error fetching listing by ID:", error);
+    return res.status(500).json({
+      message: error.message || "An error occurred while fetching the listing.",
+      success: false,
+      status: 500,
+    });
+  }
+};
+
+const createRentalRequest = async (req, res) => {
+  try {
+    const { listId } = req.params;
+    const userId = req.user._id;
+    const { message, scheduledVisit } = req.body;
+
+    const list = await Listing.findOne({ _id: listId, isVerified: true });
+
+    if (!list) {
+      return res.status(404).json({
+        message: "Listing not found or not verified for rental requests.",
+        success: false,
+        status: 404,
+      });
+    }
+
+    const existingRequest = await RentalRequest.findOne({
+      tenantId: userId,
+      listingId: listId,
+      status:"pending"
+    });
+
+    if (existingRequest) {
+      return res.status(400).json({
+        message: "You have already requested to rent this property.",
+        success: false,
+        status: 400,
+      });
+    }
+
+    const newRequest = new RentalRequest({
+      tenantId: userId,
+      listingId: listId,
+      message,
+      scheduledVisit,
+    });
+
+    await newRequest.save();
+
+    return res.status(201).json({
+      message: "Rental request sent successfully.",
+      data: newRequest,
+      success: true,
+      status: 201,
+    });
+  } catch (error) {
+    console.error("Error creating rental request:", error);
+    return res.status(500).json({
+      message:
+        error.message || "An error occurred while creating the rental request.",
+      success: false,
+      status: 500,
+    });
+  }
+};
+
+const getAllRequest = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const listings = await Listing.find({ ownerId: userId }).select("_id");
+    const listingIds = listings.map((listing) => listing._id);
+
+    if (listingIds.length === 0) {
+      return res.status(200).json({
+        message: "No rental requests found — you don't have any listings.",
+        data: [],
+        success: true,
+        status: 200,
+      });
+    }
+
+    const requests = await RentalRequest.find({
+      listingId: { $in: listingIds },
+    })
+      .populate(
+        "tenantId",
+        "name email profileImage verificationStatus verified"
+      )
+      .populate(
+        "listingId",
+        "title category subcategory rent location isAvailable"
+      )
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      message: "Rental requests retrieved successfully.",
+      data: requests,
+      success: true,
+      status: 200,
+    });
+  } catch (error) {
+    console.error("Error fetching rental requests:", error);
+    return res.status(500).json({
+      message:
+        error.message || "An error occurred while retrieving rental requests.",
+      success: false,
+      status: 500,
+    });
+  }
+};
+
+const replyToRequest = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { requestId } = req.params;
+    const { status, replyMessage } = req.body;
+
+    const allowedStatuses = ["pending", "accepted", "rejected", "cancelled"];
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        message: "Invalid status value.",
+        success: false,
+        status: 400,
+      });
+    }
+
+    const request = await RentalRequest.findById(requestId);
+    if (!request) {
+      return res.status(404).json({
+        message: "Rental request not found.",
+        success: false,
+        status: 404,
+      });
+    }
+
+    const listing = await Listing.findById(request.listingId);
+    if (!listing || String(listing.ownerId) !== String(userId)) {
+      return res.status(403).json({
+        message: "You are not authorized to respond to this request.",
+        success: false,
+        status: 403,
+      });
+    }
+    request.status = status;
+    if (replyMessage) {
+      request.landlordResponseMessage = replyMessage;
+    }
+    request.respondedAt = new Date();
+    await request.save();
+
+    const updatedRequest = await RentalRequest.findById(requestId)
+      .populate(
+        "tenantId",
+        "name email profileImage verificationStatus verified"
+      )
+      .populate(
+        "listingId",
+        "title category subcategory rent location isAvailable"
+      );
+
+    return res.status(200).json({
+      message: "Rental request updated successfully.",
+      data: updatedRequest,
+      success: true,
+      status: 200,
+    });
+  } catch (error) {
+    console.error("Error updating rental request:", error);
+    return res.status(500).json({
+      message:
+        error.message || "An error occurred while updating the rental request.",
+      success: false,
+      status: 500,
+    });
+  }
+};
+
+const getAllusersRequest = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const requests = await RentalRequest.find({ tenantId: userId })
+      .populate("tenantId", "name email profileImage verificationStatus verified")
+      .populate({
+        path: "listingId",
+        select: "title category subcategory rent location isAvailable ownerId verificationStatus isVerified",
+        populate: {
+          path: "ownerId",
+          select: "name email profileImage verificationStatus verified",
+        },
+      })
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      message: "Rental requests retrieved successfully.",
+      data: requests || [],
+      success: true,
+      status: 200,
+    });
+  } catch (error) {
+    console.error("Error fetching rental requests:", error);
+    return res.status(500).json({
+      message:
+        error.message || "An error occurred while retrieving rental requests.",
+      success: false,
+      status: 500,
+    });
+  }
+};
+
+const cancelRequest = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { requestId } = req.params;
+
+    const request = await RentalRequest.findById(requestId);
+    if (!request) {
+      return res.status(404).json({
+        message: "Rental request not found.",
+        success: false,
+        status: 404,
+      });
+    }
+
+    if ( String(request.tenantId) !== String(userId)) {
+      return res.status(403).json({
+        message: "You are not authorized to cancel to this request.",
+        success: false,
+        status: 403,
+      });
+    }
+    request.status = "cancelled";
+    await request.save();
+
+    const updatedRequest = await RentalRequest.findById(requestId)
+      .populate("tenantId", "name email profileImage verificationStatus verified")
+      .populate({
+        path: "listingId",
+        select: "title category subcategory rent location isAvailable ownerId verificationStatus isVerified",
+        populate: {
+          path: "ownerId",
+          select: "name email profileImage verificationStatus verified",
+        },
+      })
+
+    return res.status(200).json({
+      message: "Rental request cancelled successfully.",
+      data: updatedRequest,
+      success: true,
+      status: 200,
+    });
+  } catch (error) {
+    console.error("Error updating rental request:", error);
+    return res.status(500).json({
+      message:
+        error.message || "An error occurred while canceling the rental request.",
+      success: false,
+      status: 500,
+    });
+  }
+};
+
 
 export {
   CreateListing,
@@ -636,5 +942,11 @@ export {
   getAllListings,
   getLiked,
   toggleLiked,
-  getAllLikedLists
+  getAllLikedLists,
+  getListById,
+  createRentalRequest,
+  getAllRequest,
+  replyToRequest,
+  getAllusersRequest,
+  cancelRequest
 };

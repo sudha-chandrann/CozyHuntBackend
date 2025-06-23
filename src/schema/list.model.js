@@ -196,7 +196,45 @@ const ListLikeSchema = new mongoose.Schema({
     },
 })
 
+
+const RentalRequestSchema = new mongoose.Schema(
+  {
+    tenantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    listingId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Listing",
+      required: true,
+    },
+    message: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    status: {
+      type: String,
+      enum: ["pending", "accepted", "rejected", "cancelled"],
+      default: "pending",
+    },
+    scheduledVisit: {
+      type: Date, 
+    },
+    respondedAt: {
+      type: Date, 
+    },
+    landlordResponseMessage: {
+      type: String,
+      default: "",
+    }
+  },
+  { timestamps: true }
+);
+
+const RentalRequest = mongoose.model("RentalRequest", RentalRequestSchema);
 const VerificationDocument = mongoose.model("VerificationDocument", VerificationDocumentSchema);
 const Listing = mongoose.model("Listing", ListingSchema);
 const ListLike= mongoose.model("ListLike",ListLikeSchema)
-export { Listing, VerificationDocument,ListLike };
+export { Listing, VerificationDocument,ListLike,RentalRequest};
