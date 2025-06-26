@@ -1,18 +1,20 @@
 import { cloudinary } from "../middleware/multer.js";
 import { User, VerificationRequest } from "../schema/user.model.js";
 import { sendVerifyEmail } from "../utils/sendVerifyEmail.js";
+import dotenv from "dotenv";
+dotenv.config();
 
 const registerUser = async (req, res) => {
   try {
-    const { name, email, password, profileImage } = req.body;
-    if (!name || !email || !password || !profileImage) {
+    const { name, email, password, profileImage, role } = req.body;
+    if (!name || !email || !password || !profileImage || !role) {
       return res.status(400).json({
         message: "Please fill in all required fields",
         success: false,
         status: 400,
       });
     }
-    const existingUser = await User.findOne({email});
+    const existingUser = await User.findOne({ email });
 
     if (existingUser) {
       if (existingUser.IsVerfied) {
@@ -30,7 +32,7 @@ const registerUser = async (req, res) => {
       password,
       profileImage: profileImage || "",
       email,
-      role:'user'
+      role,
     });
 
     if (!newUser) {
@@ -58,7 +60,7 @@ const registerUser = async (req, res) => {
 
 const loginUser = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, admincode } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({
@@ -94,21 +96,40 @@ const loginUser = async (req, res) => {
       });
     }
 
+    if (user.role === "admin") {
+      const originalcode = process.env.ADMIN_CODE;
+      if (!originalcode) {
+        return res.status(401).json({
+          message: " originalcode is not available",
+          success: false,
+          status: 401,
+        });
+      }
+      if (admincode !== originalcode) {
+        return res.status(401).json({
+          message: "Invalid admincode",
+          success: false,
+          status: 401,
+        });
+      }
+    }
+
     const refreshToken = user.generateRefreshToken();
 
     const cookieOptions = {
       httpOnly: true,
       secure: true,
       sameSite: "none",
-      maxAge: 24 * 60 * 60 * 1000, 
-      path:"/"
+      maxAge: 24 * 60 * 60 * 1000,
+      path: "/",
     };
 
     return res.cookie("token", refreshToken, cookieOptions).status(200).json({
       message: "Login successful",
       success: true,
       status: 200,
-      token: refreshToken 
+      token: refreshToken,
+      data:user.role
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -150,7 +171,7 @@ const sendVerificationCode = async (req, res) => {
     }
 
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiry = new Date(Date.now() + 10 * 60 * 1000); 
+    const expiry = new Date(Date.now() + 10 * 60 * 1000);
 
     user.verficationCode = code;
     user.verficationCodeExpires = expiry;
@@ -245,7 +266,7 @@ const logout = async (req, res) => {
       httpOnly: true,
       secure: true,
       sameSite: "none",
-      path:"/"
+      path: "/",
     };
 
     return res.clearCookie("token", cookieOptions).status(200).json({
@@ -303,23 +324,26 @@ const getcurrentUser = async (req, res) => {
 
 const determineDocumentType = (filename) => {
   const lowerFilename = filename.toLowerCase();
-  
-  if (lowerFilename.includes('aadhaar') || lowerFilename.includes('aadhar')) {
-    return 'aadhaar';
-  } else if (lowerFilename.includes('pan')) {
-    return 'pan';
-  } else if (lowerFilename.includes('license') || lowerFilename.includes('dl')) {
-    return 'driving_license';
-  } else if (lowerFilename.includes('passport')) {
-    return 'passport';
-  } else if (lowerFilename.includes('voter')) {
-    return 'voter_id';
+
+  if (lowerFilename.includes("aadhaar") || lowerFilename.includes("aadhar")) {
+    return "aadhaar";
+  } else if (lowerFilename.includes("pan")) {
+    return "pan";
+  } else if (
+    lowerFilename.includes("license") ||
+    lowerFilename.includes("dl")
+  ) {
+    return "driving_license";
+  } else if (lowerFilename.includes("passport")) {
+    return "passport";
+  } else if (lowerFilename.includes("voter")) {
+    return "voter_id";
   } else {
-    return 'government_id';
+    return "government_id";
   }
 };
 
- const uploadVerificationDocuments = async (req, res) => {
+const uploadVerificationDocuments = async (req, res) => {
   try {
     const files = req.files;
     const userId = req.user._id;
@@ -334,7 +358,7 @@ const determineDocumentType = (filename) => {
 
     const existingRequest = await VerificationRequest.findOne({
       userId: userId,
-      status: 'pending'
+      status: "pending",
     });
 
     if (existingRequest) {
@@ -342,54 +366,49 @@ const determineDocumentType = (filename) => {
         try {
           await cloudinary.uploader.destroy(file.filename);
         } catch (cleanupError) {
-          console.error('Cleanup error:', cleanupError);
+          console.error("Cleanup error:", cleanupError);
         }
       }
-      
+
       return res.status(400).json({
-        message: "You already have a pending verification request. Please wait for review.",
+        message:
+          "You already have a pending verification request. Please wait for review.",
         success: false,
         status: 400,
       });
     }
 
-    const processedDocuments = files.map(file => ({
+    const processedDocuments = files.map((file) => ({
       documentType: determineDocumentType(file.originalname),
       documentUrl: file.path,
       publicId: file.filename,
       originalName: file.originalname,
       fileSize: file.size,
-      uploadedAt: new Date()
+      uploadedAt: new Date(),
     }));
 
     const verificationRequest = new VerificationRequest({
       userId: userId,
       documents: processedDocuments,
-      status: 'pending',
-      submittedAt: new Date()
+      status: "pending",
+      submittedAt: new Date(),
     });
 
     await verificationRequest.save();
 
     await User.findByIdAndUpdate(userId, {
-      verificationStatus: 'pending',
+      verificationStatus: "pending",
     });
 
     return res.status(200).json({
-      message: "Documents uploaded successfully! Your verification request has been submitted.",
+      message:
+        "Documents uploaded successfully! Your verification request has been submitted.",
       success: true,
       status: 200,
-      data: {
-        requestId: verificationRequest._id,
-        documentsUploaded: files.length,
-        documentTypes: processedDocuments.map(doc => doc.documentType),
-        status: 'pending',
-        estimatedReviewTime: '24-48 hours'
-      },
+      data: verificationRequest
     });
-
   } catch (error) {
-    console.error('Upload error:', error);
+    console.error("Upload error:", error);
 
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
@@ -398,7 +417,7 @@ const determineDocumentType = (filename) => {
             await cloudinary.uploader.destroy(file.filename);
           }
         } catch (cleanupError) {
-          console.error('Cleanup error:', cleanupError);
+          console.error("Cleanup error:", cleanupError);
         }
       }
     }
@@ -421,11 +440,10 @@ const getVerificationDocuments = async (req, res) => {
       message: "Documents retrieved successfully!",
       success: true,
       status: 200,
-      data: existingDocuments || []
+      data: existingDocuments || [],
     });
-
   } catch (error) {
-    console.error('Retrieval error:', error);
+    console.error("Retrieval error:", error);
     return res.status(500).json({
       message: error.message || "An error occurred while retrieving documents",
       success: false,
@@ -433,7 +451,6 @@ const getVerificationDocuments = async (req, res) => {
     });
   }
 };
-
 
 export {
   registerUser,
@@ -443,5 +460,5 @@ export {
   logout,
   getcurrentUser,
   uploadVerificationDocuments,
- getVerificationDocuments 
+  getVerificationDocuments,
 };

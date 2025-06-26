@@ -38,29 +38,31 @@ export const upload = multer({
 
 export const uploadToCloudinary = (fileBuffer, originalName, mimetype) => {
   return new Promise((resolve, reject) => {
-    const resourceType = mimetype === 'application/pdf' ? 'raw' : 'image';
-    
+    const resourceType = mimetype.startsWith("image/") ? "image" : "auto";
+
     const uploadStream = cloudinary.uploader.upload_stream(
       {
-        folder: 'rentconnect/identity-documents',
+        folder: "rentconnect/identity-documents",
         resource_type: resourceType,
-        ...(resourceType === 'image' && {
-          transformation: [
-            { width: 1000, height: 1000, crop: 'limit', quality: 'auto' }
-          ]
-        }),
         public_id: `${Date.now()}-${originalName.split('.')[0]}`,
+        ...(resourceType === "image" && {
+          transformation: [
+            { width: 1000, height: 1000, crop: "limit", quality: "auto" },
+          ],
+        }),
       },
       (error, result) => {
         if (error) {
           reject(error);
         } else {
+          const fileUrl = result.secure_url;
+
           resolve({
-            url: result.secure_url,
+            url: fileUrl,
             publicId: result.public_id,
             originalName: originalName,
             fileSize: result.bytes,
-            resourceType: result.resource_type
+            resourceType: result.resource_type,
           });
         }
       }
@@ -70,12 +72,12 @@ export const uploadToCloudinary = (fileBuffer, originalName, mimetype) => {
   });
 };
 
+
 export const handleCloudinaryUpload = async (req, res, next) => {
   try {
     if (!req.files || req.files.length === 0) {
       return next();
     }
-
     const uploadPromises = req.files.map(file =>
       uploadToCloudinary(file.buffer, file.originalname, file.mimetype)
     );
